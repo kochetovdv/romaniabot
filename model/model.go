@@ -1,17 +1,19 @@
 package model
 
 type OrderFile struct {
-	ID       string
-	Date     string
-	URL      string
-	Filename string
-	Name     string
+	ID           int    `json:"id"`
+	Date         string `json:"date"`
+	URL          string `json:"url"`
+	Filename     string `json:"filename"`
+	Name         string `json:"name"`
+	IsURLBroken  bool   `json:"isURLBroken"`
+	IsDownloaded bool   `json:"isDownloaded"`
 }
 
 type Order struct {
-	ID        string
-	FileID    string
-	Year      string
-	Number    string
-	Formatted string
+	ID                int    `json:"id"`
+	FileID            int    `json:"fileid"`
+	Year              string `json:"year"`
+	Number            string `json:"number"`
+	FullNameFormatted string `json:"fullnameformatted"`
 }

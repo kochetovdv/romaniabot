@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,9 @@ import (
 	"romaniabot/model"
 	"romaniabot/pkg/extractors"
 	"romaniabot/pkg/fileutil"
+
+	"database/sql"
+	_ "modernc.org/sqlite"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -28,20 +32,44 @@ var (
 )
 
 const (
-// layoutOrder = "02.01.2006"
+	createDB = `CREATE TABLE IF NOT EXISTS OrderFile (
+		ID INTEGER PRIMARY KEY AUTOINCREMENT,
+		Date TEXT,
+		URL TEXT UNIQUE,
+		Filename TEXT UNIQUE,
+		Name TEXT,
+		IsURLBroken BOOLEAN,
+		IsDownloaded BOOLEAN DEFAULT FALSE,
+		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP);`
 )
 
 func main() {
+	// LOGGER init
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
+	// DATABASE init
+	db, err := sql.Open("sqlite", "./orders.db")
+	//Check for any error
+	if err != nil {
+		slog.Error("Database initializing error: %e", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(createDB)
+	if err != nil {
+		slog.Error("Database creating error: %e", err)
+	}
+
+	// Request to URL
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		slog.Error("Error during request: %e\n", err)
 	}
 
+	// Set user-agent for https
 	req.Header.Set("User-Agent", "RomanianBot/1.0")
-
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -71,7 +99,7 @@ func main() {
 			if err != nil {
 				log.Printf("Error during extracting <li>: %e\n", err)
 				return
-			}		
+			}
 			if tag != "" {
 				liTags = append(liTags, tag)
 			}
@@ -82,12 +110,14 @@ func main() {
 		}
 	}
 
+	// Extracting target model
 	temp, err := extractors.OrderFiles(liTags)
 	if err != nil {
 		log.Printf("Error during extracting order files: %e\n", err)
 		return
 	}
-	// write to file
+
+	// Saving to file
 	if err := fileutil.WriteToFile(outputFile, liTags); err != nil {
 		log.Printf("Error during writing outputfile %s: %e\n", outputFile, err)
 		return
