@@ -1,21 +1,16 @@
 package model
 
-import (
-	_ "database/sql"
-
-//	_ "github.com/mattn/go-sqlite3"
+const (
+	CreateDB string = `CREATE TABLE IF NOT EXISTS OrderFile (
+		ID INTEGER PRIMARY KEY AUTOINCREMENT,
+		Date TEXT,
+		URL TEXT UNIQUE,
+		Filename TEXT UNIQUE,
+		Name TEXT,
+		IsURLBroken BOOLEAN,
+		IsDownloaded BOOLEAN DEFAULT FALSE,
+		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP);`
+	OrderFileToDB string = `INSERT INTO OrderFile (Date, URL, Filename, Name) VALUES (?, ?, ?, ?)`
+	FilesToDownload string = `SELECT URL, Filename FROM OrderFile;`
 )
-
-
-
-// stmt, err := db.Prepare("INSERT INTO OrderFile (Date, URL, Filename, Name, IsURLBroken) VALUES (?, ?, ?, ?, ?)")
-// if err != nil {
-//     log.Fatal(err)
-// }
-// defer stmt.Close()
-
-// // Выполнение запроса с конкретными параметрами
-// _, err = stmt.Exec("2024-01-14", "http://example.com", "example.txt", "Example", false)
-// if err != nil {
-//     log.Fatal(err)
-// }

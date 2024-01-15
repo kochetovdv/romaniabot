@@ -4,9 +4,9 @@ package extractors
 
 import (
 	"fmt"
+	"path/filepath"
 	"romaniabot/model"
 	"strings"
-	"path/filepath"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -112,14 +112,15 @@ func Links(htmlString string) (map[string]string, error) {
 	return links, nil
 }
 
-// OrderFiles returns a slice of model.OrderFile from a slice of strings
+// OrderFiles returns a slice of model.OrderFile from a slice of strings, sorted from 2018 to 202*+.
 // Returns: {26.10.2023 https://cetatenie.just.ro/wp-content/uploads/2022/01/Ordin-1795-P-26.10.2023-art-11.pdf 1795P}
 // {26.10.2023 https://cetatenie.just.ro/wp-content/uploads/2022/01/ordin-1796-P-26.10.2023-art-11.pdf 1796P}
 // {26.10.2023 https://cetatenie.just.ro/wp-content/uploads/2022/01/ordin-1797-din-26.10.2023-art-11.pdf 1797P}
 func OrderFiles(s []string) ([]model.OrderFile, error) {
 	var result []model.OrderFile
 
-	for _, el := range s {
+	for i := len(s) - 1; i >= 0; i-- { // _, el := range s { //without sorting
+		el := s[i] // doesn`t need without sorting
 		strongText, err := StrongText(el)
 		if err != nil {
 			fmt.Printf("Error: %e\n", err)

@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 
-	"fmt"
+	_ "fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,7 +13,7 @@ import (
 
 	"romaniabot/model"
 	"romaniabot/pkg/extractors"
-	"romaniabot/pkg/fileutil"
+	_ "romaniabot/pkg/fileutil"
 
 	"database/sql"
 	_ "modernc.org/sqlite"
@@ -23,25 +23,15 @@ import (
 )
 
 var (
-	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/"
-	outputFile = "output.txt"
-	ordersPath = "orders/"
-	allowedApp = "application/pdf" // check it out
 	liTags     []string
 	OrderFiles []model.OrderFile
 )
 
 const (
-	createDB = `CREATE TABLE IF NOT EXISTS OrderFile (
-		ID INTEGER PRIMARY KEY AUTOINCREMENT,
-		Date TEXT,
-		URL TEXT UNIQUE,
-		Filename TEXT UNIQUE,
-		Name TEXT,
-		IsURLBroken BOOLEAN,
-		IsDownloaded BOOLEAN DEFAULT FALSE,
-		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP);`
+	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/"
+	outputFile = "output.txt"
+	ordersPath = "orders/"
+	allowedApp = "application/pdf" // check it out
 )
 
 func main() {
@@ -57,7 +47,7 @@ func main() {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(createDB)
+	_, err = db.Exec(model.CreateDB)
 	if err != nil {
 		slog.Error("Database creating error: %e", err)
 	}
@@ -111,16 +101,66 @@ func main() {
 	}
 
 	// Extracting target model
-	temp, err := extractors.OrderFiles(liTags)
+	orderFiles, err := extractors.OrderFiles(liTags)
 	if err != nil {
 		log.Printf("Error during extracting order files: %e\n", err)
 		return
 	}
 
-	// Saving to file
-	if err := fileutil.WriteToFile(outputFile, liTags); err != nil {
-		log.Printf("Error during writing outputfile %s: %e\n", outputFile, err)
-		return
+	// TODO: read from DB existing orderfiles
+	// TODO: find the difference between parsed and
+	statement, err := db.Prepare(model.OrderFileToDB)
+	if err != nil {
+		log.Fatal(err)
 	}
-	fmt.Println(temp)
+	defer statement.Close()
+
+	// Выполнение запроса с конкретными параметрами
+	for _, el := range orderFiles {
+		_, err := statement.Exec(el.Date, el.URL, el.Filename, el.Name)
+		if err != nil {
+			log.Printf("Error during insert in db %v: %e\n", el, err)
+		}
+	}
+
+	// Storage for URLs and files to download
+	filesToDownload := make(map[string]string)
+
+	rows, err := db.Query(model.FilesToDownload)
+	if err != nil {
+		log.Printf("Error during reading filesToDownload from db: %e\n", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var filename string
+		var url string
+
+		err = rows.Scan(&url, &filename)
+		if err != nil {
+			log.Printf("Error during scaning filesToDownload row from db:%s\t%s\t%e\n", filename, url, err)
+
+		}
+		filesToDownload[url] = filename
+	}
+
+	// Saving to file
+	// var f []string
+	// for k, v := range filesToDownload {
+	// 	f = append(f, k+"\t"+v)
+	// }
+	// if err := fileutil.WriteToFile(outputFile, f); err != nil {
+	// 	log.Printf("Error during writing outputfile %s: %e\n", outputFile, err)
+	// 	return
+	// }
+
+	//TODO: find already downloaded files, excluding them from map
+
+	//TODO: download files
+
+	//TODO: if not parsed, parse
+	//TODO: import to DB
+	//TODO: handles for bot
+	//TODO: TG-bot
+
 }
