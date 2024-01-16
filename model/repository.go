@@ -1,16 +1,29 @@
 package model
 
 const (
-	CreateDB string = `CREATE TABLE IF NOT EXISTS OrderFile (
+	CreateOrderFilesDB string = `CREATE TABLE IF NOT EXISTS OrderFiles
+	(
 		ID INTEGER PRIMARY KEY AUTOINCREMENT,
-		Date TEXT,
-		URL TEXT UNIQUE,
-		Filename TEXT UNIQUE,
-		Name TEXT,
+		Date TEXT NOT NULL,
+		URL TEXT UNIQUE NOT NULL,
+		Filename TEXT UNIQUE NOT NULL,
+		Name TEXT NOT NULL,
 		IsURLBroken BOOLEAN,
 		IsDownloaded BOOLEAN DEFAULT FALSE,
 		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP);`
-	OrderFileToDB string = `INSERT INTO OrderFile (Date, URL, Filename, Name) VALUES (?, ?, ?, ?)`
-	FilesToDownload string = `SELECT URL, Filename FROM OrderFile;`
+		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	CreateOrdersDB string = `CREATE TABLE IF NOT EXISTS Orders
+	(
+		ID INTEGER PRIMARY KEY AUTOINCREMENT,
+		FileId TEXT NOT NULL,
+		Year TEXT NOT NULL,
+		Number TEXT NOT NULL,
+		FullNameFormatted TEXT NOT NULL UNIQUE,
+		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (FileId) REFERENCES OrderFile (id) ON DELETE CASCADE
+	)`
+	OrderFileToDB   string = `INSERT INTO OrderFiles (Date, URL, Filename, Name) VALUES (?, ?, ?, ?)`
+	FilesToDownload string = `SELECT URL, Filename FROM OrderFiles;`
 )

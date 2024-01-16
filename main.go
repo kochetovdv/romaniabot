@@ -4,18 +4,19 @@ import (
 	"bytes"
 
 	_ "fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 
 	"log/slog"
 
 	"romaniabot/model"
+	"romaniabot/pkg/downloaders"
 	"romaniabot/pkg/extractors"
 	_ "romaniabot/pkg/fileutil"
+	"romaniabot/pkg/web"
 
 	"database/sql"
+
 	_ "modernc.org/sqlite"
 
 	"golang.org/x/net/html"
@@ -31,7 +32,7 @@ const (
 	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/"
 	outputFile = "output.txt"
 	ordersPath = "orders/"
-	allowedApp = "application/pdf" // check it out
+	allowedApp = "application/pdf"
 )
 
 func main() {
@@ -47,32 +48,26 @@ func main() {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(model.CreateDB)
+	// Creating model for OrderFiles in DB
+	_, err = db.Exec(model.CreateOrderFilesDB)
 	if err != nil {
-		slog.Error("Database creating error: %e", err)
+		slog.Error("Database table for OrderFiles creating error: %e", err)
+	}
+
+	// Creating model for Orders in DB
+	_, err = db.Exec(model.CreateOrdersDB)
+	if err != nil {
+		slog.Error("Database table for Orders creating error: %e", err)
 	}
 
 	// Request to URL
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		slog.Error("Error during request: %e\n", err)
-	}
-
-	// Set user-agent for https
-	req.Header.Set("User-Agent", "RomanianBot/1.0")
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Error during connect to %s: %e\n", url, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := web.GetResponseBody(url)
 	if err != nil {
 		log.Printf("Error during reading body response: %e\n", err)
 		return
 	}
 
+	// Extracting all <li> tags
 	reader := bytes.NewReader(body)
 	z := html.NewTokenizer(reader)
 
@@ -107,8 +102,7 @@ func main() {
 		return
 	}
 
-	// TODO: read from DB existing orderfiles
-	// TODO: find the difference between parsed and
+	// Saving order files to DB
 	statement, err := db.Prepare(model.OrderFileToDB)
 	if err != nil {
 		log.Fatal(err)
@@ -126,6 +120,7 @@ func main() {
 	// Storage for URLs and files to download
 	filesToDownload := make(map[string]string)
 
+	// read from DB existing orderfiles
 	rows, err := db.Query(model.FilesToDownload)
 	if err != nil {
 		log.Printf("Error during reading filesToDownload from db: %e\n", err)
@@ -141,7 +136,7 @@ func main() {
 			log.Printf("Error during scaning filesToDownload row from db:%s\t%s\t%e\n", filename, url, err)
 
 		}
-		filesToDownload[url] = filename
+		filesToDownload[filename] = url
 	}
 
 	// Saving to file
@@ -149,17 +144,16 @@ func main() {
 	// for k, v := range filesToDownload {
 	// 	f = append(f, k+"\t"+v)
 	// }
-	// if err := fileutil.WriteToFile(outputFile, f); err != nil {
+	// if err := fileutil.WriteToFileStrings(outputFile, f); err != nil {
 	// 	log.Printf("Error during writing outputfile %s: %e\n", outputFile, err)
 	// 	return
 	// }
 
-	//TODO: find already downloaded files, excluding them from map
+	// download files
+	downloaders.Downloader(ordersPath, filesToDownload)
 
-	//TODO: download files
-
-	//TODO: if not parsed, parse
-	//TODO: import to DB
+	//TODO: if files not parsed, parse
+	//TODO: import result to DB
 	//TODO: handles for bot
 	//TODO: TG-bot
 
