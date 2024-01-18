@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"romaniabot/model"
 	"romaniabot/pkg/downloaders"
 	"romaniabot/pkg/extractors"
-	_ "romaniabot/pkg/fileutil"
 	"romaniabot/pkg/web"
 
 	"database/sql"
@@ -29,51 +29,52 @@ var (
 )
 
 const (
-	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/"
-	outputFile = "output.txt"
+	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/" // TODO: slice of links
+//	outputFile = "output.txt" 
 	ordersPath = "orders/"
 	allowedApp = "application/pdf"
 )
 
 func main() {
-	// LOGGER init
+	// Initialize logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	// DATABASE init
+	// Initialize database
 	db, err := sql.Open("sqlite", "./orders.db")
-	//Check for any error
 	if err != nil {
 		slog.Error("Database initializing error: %e", err)
+		return
 	}
 	defer db.Close()
 
-	// Creating model for OrderFiles in DB
+	// Create OrderFiles table in the database
 	_, err = db.Exec(model.CreateOrderFilesDB)
 	if err != nil {
 		slog.Error("Database table for OrderFiles creating error: %e", err)
+		return
 	}
 
-	// Creating model for Orders in DB
+	// Create Orders table in the database
 	_, err = db.Exec(model.CreateOrdersDB)
 	if err != nil {
 		slog.Error("Database table for Orders creating error: %e", err)
+		return
 	}
 
-	// Request to URL
+	// Request URL
 	body, err := web.GetResponseBody(url)
 	if err != nil {
 		log.Printf("Error during reading body response: %e\n", err)
 		return
 	}
 
-	// Extracting all <li> tags
+	// Extract <li> tags
 	reader := bytes.NewReader(body)
 	z := html.NewTokenizer(reader)
 
 	for {
 		tt := z.Next()
-		cancel := false
 		if tt == html.ErrorToken {
 			err := z.Err()
 			slog.Error("Error in main (html.ErrorToken):", err)
@@ -88,28 +89,24 @@ func main() {
 			if tag != "" {
 				liTags = append(liTags, tag)
 			}
-
-		}
-		if cancel {
-			break
 		}
 	}
 
-	// Extracting target model
+	// Extract target model
 	orderFiles, err := extractors.OrderFiles(liTags)
 	if err != nil {
 		log.Printf("Error during extracting order files: %e\n", err)
 		return
 	}
 
-	// Saving order files to DB
+	// Save order files to DB
 	statement, err := db.Prepare(model.Insert_Order_File)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer statement.Close()
 
-	// Выполнение запроса с конкретными параметрами
+	// Execute query with specific parameters
 	for _, el := range orderFiles {
 		_, err := statement.Exec(el.Date, el.URL, el.Filename, el.Name)
 		if err != nil {
@@ -117,149 +114,181 @@ func main() {
 		}
 	}
 
-	// TODO: отдельно запрос filename для FileCheck, отдельно url для BrokenUrls, и после уже данный FileUrls
+	// Check downloaded order files in folder
 	FilesToDownloadCheck(db)
+	// Check broken URLs
 	URLsToCheck(db)
+	// Download order files
 	Download(db)
 
-	// TODO: download order files
+	// TODO: IsExtension - remove if unnecessary
 
-
-	// TODO: IsExtension
-	// TODO: битые ссылки. Пусть возвращается мапа элементов, которые не прочитались, далее по ним пройдемся
-
-	//TODO: if files not parsed, parse
-	//TODO: import result to DB
-	//TODO: handles for bot
-	//TODO: TG-bot
-
+	// TODO: if files not parsed, parse
+	// TODO: import result to DB
+	// TODO: handles for bot
+	// TODO: TG-bot
 }
 
+// FilesToDownloadCheck checks the downloaded files and updates the database accordingly.
 func FilesToDownloadCheck(db *sql.DB) {
-	// Storage for FileNames to download
-	var filesToDownload []string
+	// Create a slice to store the filenames that need to be downloaded
+	filesToDownload := make([]string, 0)
 
-	// read from DB existing orderfiles
-	rows, err := db.Query(model.Get_new_Filenames)
+	// Query the database to get the new filenames
+	rows, err := db.QueryContext(context.Background(), model.Get_new_Filenames)
 	if err != nil {
 		log.Printf("Error during reading filesToDownload from db: %e\n", err)
+		return
 	}
 	defer rows.Close()
 
+	// Iterate over the rows returned by the query
 	for rows.Next() {
 		var filename string
 
+		// Scan the filename from the row
 		err = rows.Scan(&filename)
 		if err != nil {
-			log.Printf("Error during scaning filesToDownload row from db:%s\t%e\n", filename, err)
-
+			log.Printf("Error during scanning filesToDownload row from db: %s\t%e\n", filename, err)
+			continue
 		}
+
+		// Append the filename to the filesToDownload slice
 		filesToDownload = append(filesToDownload, filename)
 	}
 
-	fmt.Println("Total files to download from DB: ", len(filesToDownload))
-	downloadedFiles := downloaders.CheckDownloadedFiles(ordersPath, filesToDownload)
-	fmt.Println("Total downloaded files after checking folder: ", len(downloadedFiles))
+	// Print the total number of files to be downloaded
+	fmt.Println("Total files to download from DB:", len(filesToDownload))
 
+	// Check the downloaded files in the specified folder
+	downloadedFiles := downloaders.CheckDownloadedFiles(ordersPath, filesToDownload)
+	// Print the total number of downloaded files after checking the folder
+	fmt.Println("Total downloaded files after checking folder:", len(downloadedFiles))
+
+	// If there are downloaded files, update the database
 	if len(downloadedFiles) > 0 {
-		// Обновляем информацию в БД
-		statement, err := db.Prepare(model.Set_is_Downloaded)
+		// Prepare the update statement
+		statement, err := db.PrepareContext(context.Background(), model.Set_is_Downloaded)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer statement.Close()
 
-		// Выполнение запроса с конкретными параметрами
+		// Iterate over the downloaded files and execute the update statement
 		for _, el := range downloadedFiles {
 			_, err := statement.Exec(el)
 			if err != nil {
 				log.Printf("Error during update in db %v: %e\n", el, err)
+				continue
 			}
 		}
 	}
 }
 
 func URLsToCheck(db *sql.DB) {
-	// Storage for FileNames to download
-	var urlsToCheck []string
+	// Create an empty slice to store the URLs that need to be checked
+	urlsToCheck := make([]string, 0)
 
-	// read from DB existing orderfiles
+	// Query the database to get the valid URLs
 	rows, err := db.Query(model.Get_Valid_URLs)
 	if err != nil {
+		// Log an error message if there is an error querying the database
 		log.Printf("Error during reading URLs to check from db: %e\n", err)
+		return
 	}
 	defer rows.Close()
 
+	// Iterate over the rows returned from the query
 	for rows.Next() {
 		var url string
 
+		// Scan the value of the URL column into the 'url' variable
 		err = rows.Scan(&url)
 		if err != nil {
-			log.Printf("Error during scaning URLs row from db:%s\t%e\n", url, err)
-
+			// Log an error message if there is an error scanning the row
+			log.Printf("Error during scanning URLs row from db: %s\t%e\n", url, err)
+			continue
 		}
+		// Append the URL to the 'urlsToCheck' slice
 		urlsToCheck = append(urlsToCheck, url)
 	}
 
+	// Print the total number of URLs to check
 	fmt.Println("Total URLs to check from DB: ", len(urlsToCheck))
-	brokenURLs := downloaders.CheckBrokenURLs(urlsToCheck, 2, time.Second*20)
-	fmt.Println("Total broken URLs after ping: ", len(brokenURLs))
-	if len(brokenURLs) > 0 {
-		// Обновляем информацию в БД
-		statement, err := db.Prepare(model.Set_broken_URLs)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer statement.Close()
 
-		// Выполнение запроса с конкретными параметрами
-		for _, el := range brokenURLs {
-			_, err := statement.Exec(el)
-			if err != nil {
-				log.Printf("Error during update in db %v: %e\n", el, err)
-			}
+	// Call the 'CheckBrokenURLs' function to check the broken URLs
+	brokenURLs := downloaders.CheckBrokenURLs(urlsToCheck, 2, time.Second*20)
+
+	// Print the total number of broken URLs after pinging
+	fmt.Println("Total broken URLs after ping: ", len(brokenURLs))
+
+	// If there are no broken URLs, return
+	if len(brokenURLs) == 0 {
+		return
+	}
+
+	// Prepare a statement to update the broken URLs in the database
+	statement, err := db.Prepare(model.Set_broken_URLs)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer statement.Close()
+
+	// Iterate over the broken URLs and execute the update statement for each URL
+	for _, el := range brokenURLs {
+		_, err := statement.Exec(el)
+		if err != nil {
+			// Log an error message if there is an error updating the database
+			log.Printf("Error during update in db %v: %e\n", el, err)
 		}
 	}
 }
 
+// Refactored Download function
 func Download(db *sql.DB) {
 	// Storage for FileNames to download
 	filesToDownload := make(map[string]string)
 
-	// read from DB existing orderfiles
+	// Read from DB existing orderfiles
 	rows, err := db.Query(model.Get_Files_to_download)
 	if err != nil {
 		log.Printf("Error during reading FileURLs to check from db: %e\n", err)
+		return
 	}
 	defer rows.Close()
 
+	// Iterate over the rows returned by the query
 	for rows.Next() {
 		var filename string
 		var url string
 
 		err = rows.Scan(&url, &filename)
 		if err != nil {
-			log.Printf("Error during scaning URLs row from db:%s\t%s\t%e\n", url, filename, err)
-
+			log.Printf("Error during scanning URLs row from db:%s\t%s\t%e\n", url, filename, err)
+			continue
 		}
+
+		// Add the filename and url to the filesToDownload map
 		filesToDownload[filename] = url
 	}
 
 	fmt.Println("Total Files to download from DB: ", len(filesToDownload))
 	downloaders.Downloader(ordersPath, filesToDownload)
 
-	// Обновляем информацию в БД
+	// Update information in the database
 	statement, err := db.Prepare(model.Set_is_Downloaded)
 	if err != nil {
 		log.Fatal(err)
+		return
 	}
 	defer statement.Close()
 
-	// Выполнение запроса с конкретными параметрами
+	// Execute the query with specific parameters
 	for fname := range filesToDownload {
 		_, err := statement.Exec(fname)
 		if err != nil {
 			log.Printf("Error during update in db %v: %e\n", fname, err)
+			continue
 		}
 	}
 }
