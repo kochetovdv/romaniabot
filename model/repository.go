@@ -8,7 +8,7 @@ const (
 		URL TEXT UNIQUE NOT NULL,
 		Filename TEXT UNIQUE NOT NULL,
 		Name TEXT NOT NULL,
-		IsURLBroken BOOLEAN,
+		IsURLBroken BOOLEAN DEFAULT FALSE,
 		IsDownloaded BOOLEAN DEFAULT FALSE,
 		CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -24,6 +24,15 @@ const (
 		UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (FileId) REFERENCES OrderFile (id) ON DELETE CASCADE
 	)`
-	OrderFileToDB   string = `INSERT INTO OrderFiles (Date, URL, Filename, Name) VALUES (?, ?, ?, ?)`
-	FilesToDownload string = `SELECT URL, Filename FROM OrderFiles;`
+	Insert_Order_File string = `INSERT INTO OrderFiles (Date, URL, Filename, Name) VALUES (?, ?, ?, ?)`
+	Get_new_Filenames string = `SELECT Filename FROM OrderFiles WHERE IsDownloaded = false;`
+	Get_Valid_URLs    string = `SELECT URL FROM OrderFiles WHERE IsURLBroken = false AND IsDownloaded = false;`
+
+	Get_Files_to_download string = `SELECT URL, Filename FROM OrderFiles WHERE IsURLBroken = false AND IsDownloaded = false;` // добавить не скачанные и не битые
+	Set_broken_URLs       string = `UPDATE OrderFiles
+	SET IsURLBroken = true
+	WHERE URL = ?;`
+	Set_is_Downloaded string = `UPDATE OrderFiles
+	SET IsDownloaded = true
+	WHERE Filename = ?;`
 )

@@ -91,18 +91,24 @@ func CheckFile(fname string) bool {
 	return false
 }
 
-// TODO исправить в osservices
 // Сохранение в файл байтовой информацией. Файл создается с нуля, не дополняется
-func WriteToFile(pathForSave, filename string, b []byte) {
+func WriteToFile(pathForSave, filename string, b []byte) error {
 	options := os.O_WRONLY | os.O_CREATE
 	mode := int(0777)
 	file, err := os.OpenFile(pathForSave+filename, options, os.FileMode(mode))
-	ErrChecking(err)
+	if err != nil {
+		return err
+	}
 	_, err = file.Write(b)
-	ErrChecking(err)
+	if err != nil {
+		return err
+	}
 	err = file.Close()
-	ErrChecking(err)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("File %s saved.\n", filename)
+	return nil
 }
 
 // Проверяем ошибки отдельной функцией чтобы не плодить код
