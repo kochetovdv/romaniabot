@@ -4,13 +4,26 @@ package extractors
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 	"romaniabot/model"
+	"strconv"
 	"strings"
+
+	"io"
+	"regexp"
+
+	"github.com/ledongthuc/pdf"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
+
+type orderLocal struct {
+	Number            uint
+	Year              uint
+	FullNameFormatted string
+}
 
 // InsideTags saves all tags with attributes and text between <li> tags
 // Returns: "<li>Data de&nbsp;<strong>26.10.2023&nbsp;</strong>numărul:&nbsp;&nbsp;<a href="https://cetatenie.just.ro/wp-content/uploads/2022/01/Ordin-1795-P-26.10.2023-art-11.pdf">1795P</a>&nbsp;<a href="https://cetatenie.just.ro/wp-content/uploads/2022/01/ordin-1796-P-26.10.2023-art-11.pdf">1796P</a>&nbsp;&nbsp;<a href="https://cetatenie.just.ro/wp-content/uploads/2022/01/ordin-1797-din-26.10.2023-art-11.pdf">1797P</a></li>"
@@ -144,4 +157,132 @@ func OrderFiles(s []string) ([]model.OrderFile, error) {
 	}
 
 	return result, nil
+}
+
+// Parse the pdf file and return the list of orders
+func Order(path string, orderFiles ...string) ([]model.Order, error) {
+	// tager storage for data
+	orders := make([]model.Order, 0, len(orderFiles))
+
+	for _, filename := range orderFiles {
+		ordersFromPDF, err := orderFromPDF(path, filename)
+		if err != nil {
+			fmt.Printf("error in orderFromPDf:%s\t%e\t", filename, err)
+			continue
+		}
+		orders = append(orders, ordersFromPDF...)
+	}
+
+	return orders, nil
+}
+
+// Parse the pdf file and return the list of orders
+func orderFromPDF(path string, filename string) ([]model.Order, error) {
+	orders := make([]model.Order, 0)
+
+	// Open the PDF file
+	file, pdfReader, err := pdf.Open(path + filename)
+	if err != nil {
+		fmt.Printf("error in openning PDF-file: %s\n%e\n", filename, err)
+		file.Close()
+		return nil, err
+	}
+	defer file.Close()
+
+	// Extract the text from the PDF
+	text, err := pdfReader.GetPlainText()
+	if err != nil {
+		fmt.Printf("error in extracting file data: %s\n%e\n", filename, err)
+		file.Close()
+		return nil, err
+	}
+
+	data, _ := io.ReadAll(text)
+	data2 := string(data)
+
+	// Extract the digits using a regular expression
+	fmt.Printf("String: %s\n", data2)
+
+	//re := regexp.MustCompile(`(\d+\/\d{4})`)
+	re := regexp.MustCompile(`(\d+\/[A-Za-z]{0,2}\/\d{4}|\d+\/\d{4})`)
+
+	digits := re.FindAllString(data2, -1)
+	fmt.Printf("digits: %v\t\n", digits)
+	for _, digit := range digits {
+		o, err := orderFromLine(digit)
+		if err != nil {
+			// return nil, err
+			continue
+		}
+		order := model.Order{
+			Filename:          filename,
+			Year:              o.Year,
+			Number:            o.Number,
+			FullNameFormatted: o.FullNameFormatted,
+		}
+		orders = append(orders, order)
+	}
+
+	return orders, nil
+}
+
+// orderFromLine extracts an order and year from a single line, returning a local struct
+func orderFromLine(s string) (orderLocal, error) {
+	// Split the input string
+	parts := strings.Split(s, "/")
+
+	// Check the length of the resulting slice for readability
+	numParts := len(parts)
+
+	// If the length of the slice is less than 2, it means there won't be an order and year
+	if numParts < 2 {
+		return orderLocal{}, fmt.Errorf("error during splitting in orderFromLine:%s\tresult is:%v", s, parts)
+	}
+
+	// Function for checking and extracting a number from a string
+	checkAndExtractNumber := func(str string) (uint, error) {
+		n, err := strconv.ParseUint(str, 10, 32)
+		if err != nil {
+			return 0, fmt.Errorf("error extracting number from line: %s\t%w\t", str, err)
+		}
+		return uint(n), nil
+	}
+
+	// Function for checking and extracting a year from a string
+	checkAndExtractYear := func(str string) (uint, error) {
+		n, err := strconv.ParseUint(str, 10, 32)
+		if err != nil {
+			log.Printf("error extracting year from line: %s\t%e\t", str, err)
+			return 0, fmt.Errorf("error extracting year from line: %s\t%w\t", str, err)
+		}
+		if n < 2010 || n > 2050 {
+			log.Printf("error extracting year from line: %s\tinvalid year\t", str)
+			return 0, fmt.Errorf("error extracting year from line: %s\tinvalid year\t", str)
+		}
+		return uint(n), nil
+	}
+
+	// Extract the number from the first part of the input
+	number, err := checkAndExtractNumber(parts[0])
+	if err != nil {
+		return orderLocal{}, err
+	}
+
+	// Extract the year from the last part of the input
+	year, err := checkAndExtractYear(parts[numParts-1])
+	if err != nil {
+		return orderLocal{}, err
+	}
+
+	// Format the full name using the extracted number and year
+	fullName := strconv.Itoa(int(number)) + "/" + strconv.Itoa(int(year))
+
+	// Create and return the order local struct
+	order := orderLocal{
+		Number:            number,
+		Year:              year,
+		FullNameFormatted: fullName,
+	}
+
+	return order, nil
 }

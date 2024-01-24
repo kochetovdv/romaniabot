@@ -118,6 +118,19 @@ func CheckDir(path string) bool {
 	return true
 }
 
+func GetFileListInFolder(path string) []string{
+	files, err := os.ReadDir(path)
+	var filesInDir []string
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, file := range files {
+		filesInDir = append(filesInDir, file.Name())
+	}
+	return filesInDir
+}
+
 // CheckFile checks if a file exists and returns true if it does, false otherwise.
 func CheckFile(fname string) bool {
 	_, err := os.Stat(fname)

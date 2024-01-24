@@ -13,6 +13,7 @@ import (
 	"romaniabot/model"
 	"romaniabot/pkg/downloaders"
 	"romaniabot/pkg/extractors"
+	"romaniabot/pkg/fileutil"
 	"romaniabot/pkg/web"
 
 	"database/sql"
@@ -29,8 +30,8 @@ var (
 )
 
 const (
-	url        = "https://cetatenie.just.ro/ordine-articolul-1-1/" // TODO: slice of links
-//	outputFile = "output.txt" 
+	url = "https://cetatenie.just.ro/ordine-articolul-1-1/" // TODO: slice of links
+	//	outputFile = "output.txt"
 	ordersPath = "orders/"
 	allowedApp = "application/pdf"
 )
@@ -62,6 +63,26 @@ func main() {
 		return
 	}
 
+	// Get <li> tags from target URL
+	// LiTagsExtractor(db)
+	// // Check downloaded order files in folder
+	// FilesToDownloadCheck(db)
+	// // Check broken URLs
+	// URLsToCheck(db)
+	// // Download order files
+	// Download(db)
+	// // Parsing orders
+	ParsePDF(db)
+
+	// TODO: IsExtension - remove if unnecessary
+
+	// TODO: if files not parsed, parse
+	// TODO: import result to DB
+	// TODO: handles for bot
+	// TODO: TG-bot
+}
+
+func LiTagsExtractor(db *sql.DB) {
 	// Request URL
 	body, err := web.GetResponseBody(url)
 	if err != nil {
@@ -113,20 +134,6 @@ func main() {
 			log.Printf("Error during insert in db %v: %e\n", el, err)
 		}
 	}
-
-	// Check downloaded order files in folder
-	FilesToDownloadCheck(db)
-	// Check broken URLs
-	URLsToCheck(db)
-	// Download order files
-	Download(db)
-
-	// TODO: IsExtension - remove if unnecessary
-
-	// TODO: if files not parsed, parse
-	// TODO: import result to DB
-	// TODO: handles for bot
-	// TODO: TG-bot
 }
 
 // FilesToDownloadCheck checks the downloaded files and updates the database accordingly.
@@ -289,6 +296,92 @@ func Download(db *sql.DB) {
 		if err != nil {
 			log.Printf("Error during update in db %v: %e\n", fname, err)
 			continue
+		}
+	}
+}
+
+// Parse PDF
+func ParsePDF(db *sql.DB) {
+	// Storage for FileNames which are parsed by data from DB
+	parsedFiles := make([]string, 0)
+	filesToParse := make([]string, 0)
+
+	// Read from DB filenames
+	rows, err := db.Query(model.Get_Files_not_parsed)
+	if err != nil {
+		log.Printf("Error during reading FileURLs to check from db: %e\n", err)
+		return
+	}
+	defer rows.Close()
+
+	// Iterate over the rows returned by the query
+	for rows.Next() {
+		var filename string
+
+		err = rows.Scan(&filename)
+		if err != nil {
+			log.Printf("Error during scanning URLs row from db:%s\t%e\n", filename, err)
+			continue
+		}
+
+		// Add the filename to the slice
+		parsedFiles = append(parsedFiles, filename)
+	}
+	log.Println("Total Files parsed from DB: ", len(parsedFiles))
+
+	// Get all downloaded files from folder
+	filesInFolder := fileutil.GetFileListInFolder(ordersPath)
+	log.Println("Total Files in folder: ", len(filesInFolder))
+
+	// Get difference between downloaded and parsed
+	for _, fileInFolder := range filesInFolder {
+		isParsed := false
+		for _, fileInDB := range parsedFiles {
+			if fileInFolder == fileInDB {
+				isParsed = true
+				break
+			}
+		}
+		if isParsed {
+			filesToParse = append(filesToParse, fileInFolder)
+		}
+
+	}
+
+	orders, err := extractors.Order(ordersPath, filesToParse...)
+	if err != nil {
+		log.Printf("error:%e\n", err)
+	}
+
+	fmt.Println(orders)
+
+	// save to DB
+	statement, err := db.Prepare(model.Insert_Order)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer statement.Close()
+
+	// Execute query with specific parameters
+	for _, el := range orders {
+		_, err := statement.Exec(el.Filename, el.Number, el.Year, el.FullNameFormatted)
+		if err != nil {
+			log.Printf("Error during insert in db %v: %e\n", el, err)
+		}
+	}
+
+	// Update to DB
+	statement, err = db.Prepare(model.Set_is_Parsed)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer statement.Close()
+
+	// Execute query with specific parameters
+	for _, el := range orders {
+		_, err := statement.Exec(el.Filename)
+		if err != nil {
+			log.Printf("Error during update in db %v: %e\n", el, err)
 		}
 	}
 }
